@@ -1,5 +1,6 @@
-#ClienRemover.py
-#2017.11.11
+﻿#ClienRemover.py
+#0.1.0: 2017.11.11
+#0.2.0: 2018.08.23
 import requests
 from bs4 import BeautifulSoup as bs
 
@@ -9,112 +10,113 @@ user_info = {
     'userPassword': 'your pw'#클리앙 비밀번호 입력
 }
 
-#urls
+# urls
 main_url = 'https://www.clien.net'
 login_url = 'https://www.clien.net/service/login'
 article_list_url = 'https://www.clien.net/service/mypage/myArticle?&type=articles&po='
 comment_list_url = 'https://www.clien.net/service/mypage/myArticle?&type=comments&po='
 
 api = 'https://www.clien.net/service/api'
-comment_list_api_param = '/comment?param=%7B%22order%22%3A%22date%22%2C%22po%22%3A0%2C%22ps%22%3A999999%7D'
+comment_list_url_param = '/comment?order=date&po=0&ps=10000&writer=prosumer'
 
-#message
+# message
 m_progress_list = '번째 리스트를 확인중입니다.'
 m_program_exit = '==프로그램이 종료되었습니다.=='
 
-#functions
+
+# functions
 def set_csrf(page, param):
     html = page.text
     soup = bs(html, 'html.parser')
     csrf = soup.find('input', {'name': '_csrf'})
     return {**param, **{'_csrf': csrf['value']}}
 
+
 def check_end(page):
     soup = bs(page.text, 'html.parser')
-    title = soup.select('div.board-list.list-grid > div > div')
-    message = title[0].text.strip()
-    if message == '작성한 게시글이 없습니다.':
-            return False
+    # print(soup)
+    if soup.find('div', {'class': 'list_empty'}):
+        return False
     return True
 
-#main
+
+# main
 with requests.Session() as s:
-    
-    #login
+    # login
     main_page = s.get(main_url)
     user_info = set_csrf(main_page, user_info)
-    
-    #request login
-    login_req = s.post(login_url, data = user_info)
 
-    #remove comment
+    # request login
+    login_req = s.post(login_url, data=user_info)
+
+    # remove comment
     list_no = 0
     while True:
         list_url = comment_list_url + str(list_no)
         list_no += 1
 
-       #check end list
+        # check end list
         list_page = s.get(list_url)
-        print(list_url)
         if not check_end(list_page):
             break
-        
+
         print(str(list_no) + m_progress_list)
 
         soup = bs(list_page.text, 'html.parser')
-        title = soup.select('div.list-title.pointer > a')
+        title = soup.select('div.list_title > a')
         for t in title:
-            
-            #get comment list on article
+
+            # get comment list on article
             article_url = main_url + t.get('href')
-            comment_list_api = api + t.get('href')[8:] + comment_list_api_param
+            comment_url = article_url + comment_list_url_param
             comment_delete_api = api + t.get('href')[8:] + '/comment/delete/'
-            comment_list_json = s.get(comment_list_api).json()
-            n = len(comment_list_json)
-            
-            for i in comment_list_json:
-                if i['member']:
-                    if i['member']['userId'] == user_info['userId']:
-                        #get comment's serial number
-                        commentSn = i['commentSn']
-                        print(commentSn)
-                        article_page = s.get(article_url)
+            article_comment_list = s.get(comment_url)
+            soup = bs(article_comment_list.text,'html.parser')
+            my_comment_list = soup.find_all('div',{'class':'by-me'})
 
-                        #request server to remove comment
-                        remove_req = s.post(comment_delete_api + str(commentSn), data = set_csrf(article_page, {}))
+            n = len(my_comment_list)
 
+            for i in my_comment_list:
+                commentSn = i.get('data-comment-sn')
+                article_page = s.get(article_url)
 
-    #remove article
+                # request server to remove comment
+                if article_page.status_code == 200: # for non-deleted articles only
+                    print(commentSn)
+                    remove_req = s.post(comment_delete_api + str(commentSn), data=set_csrf(article_page, {}))
+
+    # remove article
     list_no = 0
     while True:
         list_url = article_list_url + str(list_no)
         list_no += 1
 
-        #check end list
+        # check end list
         list_page = s.get(list_url)
         if not check_end(list_page):
             break
-        
+
         print(str(list_no) + m_progress_list)
 
         soup = bs(list_page.text, 'html.parser')
-        title = soup.select('div.list-title.pointer > a')
+        title = soup.select('div.list_title > a.list_subject')
         for t in title:
-            
-            #connect to article
+
+            # connect to article
             article_url = main_url + t.get('href')
-            article_delete_api = api + '/board/' +t.get('href').split('/')[-2]+ '/delete'
+            article_delete_api = api + '/board/' + t.get('href').split('/')[-2] + '/delete'
             article_page = s.get(article_url)
-            
+
             if article_page.status_code == 200:
                 remove_article = {
                     'boardSn': t.get('href').split('/')[-1]
                 }
                 remove_article = set_csrf(article_page, remove_article)
 
-                #request server to remove article
-                remove_req = s.post(article_delete_api, data = remove_article)
+                print(t.get('href').split('/')[-1])
 
+                # request server to remove article
+                remove_req = s.post(article_delete_api, data=remove_article)
 
-#exit
+# exit
 print(m_program_exit)
